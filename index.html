@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>無料ダイヤルパッド通話</title>
+    <script>
+        let localConnection;
+        let remoteConnection;
+        let localStream;
+        const socket = io();
+
+        async function startCall() {
+            const target = document.getElementById('target-id').value;
+            if (!target) {
+                alert('相手のIDを入力してください');
+                return;
+            }
+
+            localConnection = new RTCPeerConnection();
+            localConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('ice-candidate', { candidate: event.candidate, target });
+                }
+            };
+
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            localStream.getTracks().forEach(track => localConnection.addTrack(track, localStream));
+
+            const offer = await localConnection.createOffer();
+            await localConnection.setLocalDescription(offer);
+
+            socket.emit('call-user', { offer, target });
+        }
+
+        socket.on('incoming-call', async ({ offer, from }) => {
+            remoteConnection = new RTCPeerConnection();
+            remoteConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('ice-candidate', { candidate: event.candidate, target: from });
+                }
+            };
+
+            remoteConnection.ontrack = (event) => {
+                const audio = document.getElementById('remote-audio');
+                audio.srcObject = event.streams[0];
+                audio.play();
+            };
+
+            await remoteConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await remoteConnection.createAnswer();
+            await remoteConnection.setLocalDescription(answer);
+
+            socket.emit('answer-call', { answer, target: from });
+        });
+
+        socket.on('call-answered', async ({ answer }) => {
+            await localConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        });
+
+        socket.on('ice-candidate', async ({ candidate }) => {
+            const connection = localConnection || remoteConnection;
+            if (connection) {
+                await connection.addIceCandidate(new RTCIceCandidate(candidate));
+            }
+        });
+    </script>
+</head>
+<body>
+    <h1>無料ダイヤルパッド通話</h1>
+    <div>
+        <label for="target-id">相手のID:</label>
+        <input type="text" id="target-id" placeholder="相手のIDを入力">
+        <button onclick="startCall()">発信</button>
+    </div>
+    <audio id="remote-audio" controls></audio>
+
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+</body>
+</html>
